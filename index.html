@@ -50,10 +50,11 @@
   canvas{display:block;width:100%;height:100%;touch-action:none;cursor:pointer}
   footer{display:flex;gap:10px;align-items:center;padding:8px 16px 12px;flex-wrap:wrap}
   .hint{font-size:12px;color:var(--ink-soft);flex:1 1 100%}
-  #btnSound{margin-right:auto}
+  #btnHint{margin-right:auto}
+  #btnHint.on{background:#FFE9A8}
   button{
     font:inherit;font-weight:700;font-size:14px;color:var(--ink);background:var(--block);
-    border:0;border-radius:10px;padding:9px 14px;box-shadow:0 0 0 1.5px var(--ink) inset, 0 2px 0 var(--ink);
+    border:0;border-radius:10px;padding:9px 12px;box-shadow:0 0 0 1.5px var(--ink) inset, 0 2px 0 var(--ink);
     cursor:pointer;
   }
   button:active{transform:translateY(2px);box-shadow:0 0 0 1.5px var(--ink) inset}
@@ -103,6 +104,7 @@
   <footer>
     <div class="hint">タップ：矢印を抜く ／ ドラッグ：回転 ／ ピンチ・ホイール：拡大縮小</div>
     <button id="btnSound" type="button">音 ON</button>
+    <button id="btnHint" type="button">ヒント OFF</button>
     <button id="btnPrev" type="button">◀ 前</button>
     <button id="btnRetry" type="button">やり直し</button>
   </footer>
@@ -311,11 +313,12 @@ function analyze(N, arrows){
   return {depth, free0, ratio:free0/arrows.length};
 }
 // 何通りか作って、いちばん歯ごたえのある配置を採用
-function generate(stage){
+function generate(stage, seed){
+  seed = seed ?? stage*7919;
   const N=sizeFor(stage), minRay=minRayFor(stage,N); let best=null;
   const K = N>=18 ? 1 : N>=16 ? 2 : 3, maxFree=Math.max(3,Math.round(N*freeFracFor(stage)));
   for(let k=0;k<K;k++){
-    const g=generateOnce(N, stage*7919+k*104729+3, minRay, {maxFree}), m=analyze(N,g.arrows);
+    const g=generateOnce(N, seed+k*104729+3, minRay, {maxFree}), m=analyze(N,g.arrows);
     if(!m) continue;
     const score=m.depth*2 - m.ratio*20 + g.arrows.reduce((s,a)=>s+a.cells.length,0)/(6*N*N)*4;
     if(!best||score>best.score) best={...g,score,m};
@@ -459,13 +462,18 @@ const SND=(()=>{
 const ui={stage:document.getElementById('sStage'),left:document.getElementById('sLeft'),miss:document.getElementById('sMiss'),
   clear:document.getElementById('clear'),clearMsg:document.getElementById('clearMsg')};
 let S=null; const anims=new Map();
-const KEY='arrowcube.v2.stage';
+const KEY='arrowcube.v2.stage', SEEDKEY='arrowcube.seed';
 function load(){ try{ return parseInt(localStorage.getItem(KEY))||1; }catch(e){ return 1; } }
 function save(n){ try{ localStorage.setItem(KEY,String(n)); }catch(e){} }
+// 毎回ちがう配置にするための「種」。やり直しの時だけ同じ種を使う
+const newSeed=()=>(Math.floor(Math.random()*2147483647)^(Date.now()&0x7fffffff))>>>0;
+function loadSeed(){ try{ const v=parseInt(localStorage.getItem(SEEDKEY)); return isNaN(v)?null:v; }catch(e){ return null; } }
+function saveSeed(v){ try{ localStorage.setItem(SEEDKEY,String(v)); }catch(e){} }
 
-function startStage(n){
-  anims.clear(); while(group.children.length) group.remove(group.children[0]);
-  const gen=generate(n); N=gen.N;
+function startStage(n, seed){
+  anims.clear(); hintArrow=null; while(group.children.length) group.remove(group.children[0]);
+  if(seed==null) seed=newSeed(); saveSeed(seed);
+  const gen=generate(n, seed); N=gen.N;
   const tex=faceTexture(N);
   cubeMesh=new T.Mesh(new T.BoxGeometry(N,N,N), new T.MeshLambertMaterial({map:tex}));
   group.add(cubeMesh);
@@ -477,8 +485,25 @@ function startStage(n){
   instBox=new T.InstancedMesh(unitBox,MAT.ink,Math.max(1,tb)); instHead=new T.InstancedMesh(headGeo,MAT.ink,Math.max(1,th));
   instBox.frustumCulled=false; instHead.frustumCulled=false; group.add(instBox); group.add(instHead);
   group.quaternion.setFromEuler(new T.Euler(0.5,-0.72,0,'XYZ')); zoom=1;
-  S={stage:n,arrows:gen.arrows,occ,left:gen.arrows.length,miss:0,total:gen.arrows.length,combo:0};
-  ui.clear.hidden=true; save(n); rebuildStatic(); updateUI(); fitCamera();
+  S={stage:n,seed,arrows:gen.arrows,occ,left:gen.arrows.length,miss:0,total:gen.arrows.length,combo:0};
+  ui.clear.hidden=true; save(n); rebuildStatic(); updateUI(); fitCamera(); updateHint();
+}
+// ---------- ヒント：いま抜ける矢印を1本、じんわり光らせる ----------
+MAT.hint=new T.MeshLambertMaterial({color:0xF2B600, emissive:0x000000});
+let hintOn=false, hintArrow=null;
+try{ hintOn=localStorage.getItem('arrowcube.hint')==='on'; }catch(e){}
+function pickHint(){
+  let best=null, bestZ=-2;
+  for(const a of S.arrows){ if(a.gone||anims.has(a.id)||firstBlock(a,S.occ,N)) continue;
+    const z=V(a.cells[a.cells.length-1].n).applyQuaternion(group.quaternion).z; // こちらを向いている面を優先
+    if(z>bestZ){ bestZ=z; best=a; } }
+  return best;
+}
+function updateHint(){
+  if(hintArrow && !hintArrow.gone && !anims.has(hintArrow.id)){ hintArrow.active=false; clearArrow(hintArrow); }
+  hintArrow=null;
+  if(hintOn && S && S.left>0){ hintArrow=pickHint(); if(hintArrow){ hintArrow.active=true; drawArrow(hintArrow,0,MAT.hint); } }
+  rebuildStatic();
 }
 function updateUI(){ ui.stage.textContent=S.stage; ui.left.textContent=S.left; ui.miss.textContent=S.miss; }
 
@@ -496,6 +521,7 @@ function tapArrow(a){
   SND.fly(); a.gone=true; S.left--; a.cells.forEach(c=>S.occ.delete(ck(c)));
   const mat=MAT.move.clone(); mat.transparent=true;
   anims.set(a.id,{type:'fly',a,t:0,s0:a.s,mat}); a.active=true; rebuildStatic();
+  if(a===hintArrow){ hintArrow=null; updateHint(); }
   updateUI();
   if(S.left===0) setTimeout(showClear,450);
 }
@@ -544,10 +570,11 @@ function loop(now){
       a.s = an.t<out ? an.t*sp : an.t<out+0.08 ? an.max : Math.max(0,an.max-(an.t-out-0.08)*sp);
       drawArrow(a,a.s,MAT.miss);
       if(an.t>=tot){ a.s=0; anims.delete(id); a.active=false; clearArrow(a);
-        const b=an.blk; if(!b.gone&&!anims.has(b.id)&&![...anims.values()].some(x=>x.blk===b)){ b.active=false; clearArrow(b); }
+        const b=an.blk; if(!b.gone&&!anims.has(b.id)&&![...anims.values()].some(x=>x.blk===b)){ if(b===hintArrow) drawArrow(b,0,MAT.hint); else { b.active=false; clearArrow(b); } }
         rebuildStatic(); }
     }
   }
+  if(hintArrow){ const k=0.18+0.18*Math.sin(now/180); MAT.hint.emissive.setRGB(k,k*0.75,0); }
   renderer.render(scene,camera);
   requestAnimationFrame(loop);
 }
@@ -605,14 +632,17 @@ function pick(cx,cy){
 const btnSound=document.getElementById('btnSound');
 const paintSound=()=>{ btnSound.textContent=SND.on?'音 ON':'音 OFF'; btnSound.setAttribute('aria-pressed',String(SND.on)); };
 btnSound.onclick=()=>{ SND.toggle(); paintSound(); }; paintSound();
-// ステージ作成に少し時間がかかるので、先に「…」を出してから作る
-function go(n){ ui.clear.hidden=true; ui.stage.textContent=n; ui.left.textContent='…'; setTimeout(()=>startStage(n),30); }
-document.getElementById('btnRetry').onclick=()=>go(S.stage);
-document.getElementById('btnRetry2').onclick=()=>go(S.stage);
+const btnHint=document.getElementById('btnHint');
+const paintHint=()=>{ btnHint.textContent=hintOn?'ヒント ON':'ヒント OFF'; btnHint.setAttribute('aria-pressed',String(hintOn)); btnHint.classList.toggle('on',hintOn); };
+btnHint.onclick=()=>{ hintOn=!hintOn; try{ localStorage.setItem('arrowcube.hint',hintOn?'on':'off'); }catch(e){} paintHint(); updateHint(); }; paintHint();
+// ステージ作成に少し時間がかかるので、先に「…」を出してから作る。seed を渡すと同じ配置
+function go(n, seed){ ui.clear.hidden=true; ui.stage.textContent=n; ui.left.textContent='…'; setTimeout(()=>startStage(n, seed),30); }
+document.getElementById('btnRetry').onclick=()=>go(S.stage, S.seed);
+document.getElementById('btnRetry2').onclick=()=>go(S.stage, S.seed);
 document.getElementById('btnNext').onclick=()=>go(S.stage+1);
 document.getElementById('btnPrev').onclick=()=>go(Math.max(1,S.stage-1));
 
-try{ startStage(load()); resize(); requestAnimationFrame(loop); }catch(err){ window.__acShowError&&window.__acShowError('起動時: '+err.message+' / '+(err.stack||'').split(String.fromCharCode(10)).slice(0,4).join(' / ')); }
+try{ startStage(load(), loadSeed()); resize(); requestAnimationFrame(loop); }catch(err){ window.__acShowError&&window.__acShowError('起動時: '+err.message+' / '+(err.stack||'').split(String.fromCharCode(10)).slice(0,4).join(' / ')); }
 
 
 })();
