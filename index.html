@@ -204,16 +204,16 @@ function generateOnce(N, seed, minRay, opt={}){
     for(const c of cells){ const ids=freeRay.get(ck(c)); if(ids) for(const f of ids) if(free.has(f)) out.add(f); }
     return out; };
   // 最後の2周はすき間埋め：逃げ道の条件を少しゆるめて空白を減らす（埋めた矢印が他の通り道もふさぐ）
-  const PASSES=6;
+  const PASSES=7, shortFill = opt.shortFill ?? true;
   for(let pass=0;pass<PASSES;pass++){
-    const fill = pass>=PASSES-2, need = fill ? Math.min(minRay,2) : minRay;
+    const fill = pass>=PASSES-3, last = pass===PASSES-1, need = last && shortFill ? 1 : fill ? Math.min(minRay,2) : minRay;
     let placed=0;
     for(const start of shuffle(allSurface(N))){
       if(occ.has(ck(start))) continue;
       // 候補をいくつか作り、「頭の前方が長い＝あとで他の矢印に塞がれやすい」ものを選ぶ
       let best=null, bestScore=-1, bestFb=null;
       for(let tries=0;tries<tries0;tries++){
-        const target=3+Math.floor(r()*(maxLen-2));
+        const target = fill ? 2+Math.floor(r()*4) : 3+Math.floor(r()*(maxLen-2));
         const path=walk(start,target);
         if(path.length<2) continue;
         for(const cand of [path, path.slice().reverse()]){
@@ -221,14 +221,14 @@ function generateOnce(N, seed, minRay, opt={}){
           const rl=rayCells(cand[cand.length-1],headDir(cand),N).length;
           if(rl<need) continue; // 頭が端ぎりぎりで外向き＝いつでも抜ける矢印は作らない
           const fb=freeBlocked(cand);
-          if((fill || free.size>=maxFree) && fb.size<1) continue; // 最初から抜ける矢印は数本まで。それ以外は必ず他をふさぐ
+          if(((fill && !(last && shortFill)) || (!fill && free.size>=maxFree)) && fb.size<1) continue; // 最初から抜ける矢印は数本まで。それ以外は必ず他をふさぐ
           const sc=fb.size*30+rl*2+cand.length*0.5+r()*2;
           if(sc>bestScore){ bestScore=sc; best=cand; bestFb=fb; }
         }
       }
       if(best){ place(best,bestFb); placed++; }
     }
-    if(!placed && pass<PASSES-2) pass=PASSES-3;
+    if(!placed && pass<PASSES-3) pass=PASSES-4;
   }
   return {N, arrows};
 }
@@ -487,10 +487,11 @@ canvas.addEventListener('pointerup',endPointer);
 canvas.addEventListener('pointercancel',endPointer);
 canvas.addEventListener('wheel',e=>{ e.preventDefault(); zoom=clampZ(zoom*Math.exp(e.deltaY*0.0012)); fitCamera(); },{passive:false});
 const clampZ=z=>Math.max(0.45,Math.min(2.2,z));
-const qa=new T.Quaternion(), ax=new T.Vector3();
+const qa=new T.Quaternion(), ax=new T.Vector3(), ROT=0.0055;
 function rotate(dx,dy){
-  qa.setFromAxisAngle(ax.set(0,1,0),dx*0.009); group.quaternion.premultiply(qa);
-  qa.setFromAxisAngle(ax.set(1,0,0),dy*0.009); group.quaternion.premultiply(qa);
+  // 回しすぎないよう感度をひかえめに（指の動きにぴったりついてくる程度）
+  qa.setFromAxisAngle(ax.set(0,1,0),dx*ROT); group.quaternion.premultiply(qa);
+  qa.setFromAxisAngle(ax.set(1,0,0),dy*ROT); group.quaternion.premultiply(qa);
 }
 // タップした面のマスから矢印を探す（細い矢印でも押しやすい）
 function pick(cx,cy){
