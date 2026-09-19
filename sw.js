@@ -1,10 +1,10 @@
 // オフライン用：一度開いたらファイルを端末に保存しておく
-const CACHE = "arrow-cube-v2";
+const CACHE = "arrow-cube-v3";
 const CDN = "https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js";
 const FILES = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(async c => {
-    await c.addAll(FILES);
+    await c.addAll(FILES.map(u => new Request(u, {cache: "reload"})));
     try { const r = await fetch(CDN, {mode: "cors"}); if (r.ok) await c.put(CDN, r); } catch (err) {}
   }));
   self.skipWaiting();
@@ -13,6 +13,7 @@ self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Pr
 // ネットがあれば最新を取り、なければ保存したものを使う
 self.addEventListener("fetch", e => {
   if (e.request.method !== "GET") return;
-  e.respondWith(fetch(e.request).then(r => { if (r.ok || r.type === "opaque") { const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); } return r; })
+  const same = new URL(e.request.url).origin === location.origin;
+  e.respondWith(fetch(same ? new Request(e.request.url, {cache: "no-cache"}) : e.request).then(r => { if (r.ok || r.type === "opaque") { const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); } return r; })
     .catch(() => caches.match(e.request, {ignoreSearch: true, ignoreVary: true}).then(r => r || caches.match(e.request.url)).then(r => r || caches.match("./index.html"))));
 });
