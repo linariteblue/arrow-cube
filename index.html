@@ -5,13 +5,13 @@
 <meta name="theme-color" content="#E6EAE3">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="矢印キューブ">
+<meta name="apple-mobile-web-app-title" content="㋳㋦㋖">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}</style>
-<title>矢印キューブ</title>
+<title>㋳㋦㋖</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&display=swap">
 <style>
@@ -40,6 +40,7 @@
     padding:10px 16px 8px;
   }
   h1{font-size:20px;font-weight:900;margin:0;letter-spacing:.04em;display:flex;align-items:center;gap:8px}
+  h1 .name{font-size:24px;letter-spacing:.12em;font-family:"Hiragino Maru Gothic ProN","Hiragino Sans","Zen Maru Gothic","Yu Gothic UI","Meiryo",system-ui,sans-serif}
   h1 .mark{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:7px;background:var(--block);
     box-shadow:inset 0 0 0 2px var(--ink);font-size:16px}
   .stats{display:flex;gap:14px;margin-left:auto;font-size:13px;color:var(--ink-soft);font-variant-numeric:tabular-nums}
@@ -79,14 +80,14 @@
 <body>
 <div id="app">
   <header>
-    <h1><span class="mark" aria-hidden="true">➜</span>矢印キューブ</h1>
+    <h1 aria-label="やぬき"><span class="mark" aria-hidden="true">➜</span><span class="name">㋳㋦㋖</span></h1>
     <div class="stats">
       <span>ステージ<b id="sStage">1</b></span>
       <span>のこり<b id="sLeft">0</b></span>
     </div>
   </header>
   <div id="stage">
-    <canvas id="cv" aria-label="矢印キューブのプレイ画面"></canvas>
+    <canvas id="cv" aria-label="やぬきのプレイ画面"></canvas>
     <div id="fx" aria-hidden="true"></div>
     <div id="clear" hidden>
       <div class="card">
