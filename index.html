@@ -150,7 +150,7 @@ function allSurface(N){
 function rng(seed){ return function(){ seed|=0; seed=seed+0x6D2B79F5|0; let t=Math.imul(seed^seed>>>15,1|seed);
   t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
 
-const STAGE_N = [4,4,5,5,5,6,6,6,7];
+const STAGE_N = [6,6,7,7,8,8,9,9,10];
 const sizeFor = s => STAGE_N[Math.min(s-1, STAGE_N.length-1)];
 
 // 必ず解ける配置：あとで消す順の「逆順」に矢印を置いていく。
@@ -159,7 +159,7 @@ function generateOnce(N, seed){
   const r=rng(seed);
   const occ=new Map(), arrows=[];
   const shuffle=a=>{ for(let i=a.length-1;i>0;i--){ const j=Math.floor(r()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; };
-  const maxLen = 2*N+1;
+  const maxLen = 3*N;
 
   function walk(start,target){
     const path=[start], set=new Set([ck(start)]);
@@ -178,10 +178,14 @@ function generateOnce(N, seed){
     const own=new Set(cells.map(ck));
     return rayCells(cells[cells.length-1], headDir(cells), N).every(c=>{ const k=ck(c); return !occ.has(k)&&!own.has(k); });
   }
+  const rayHit=new Map(); // すでに置いた矢印の「通り道」にあたるマス
   function place(cells){
     const id=arrows.length; arrows.push({id,cells,hd:headDir(cells)});
     cells.forEach(c=>occ.set(ck(c),id));
+    rayCells(cells[cells.length-1],headDir(cells),N).forEach(c=>{ const k=ck(c); rayHit.set(k,(rayHit.get(k)||0)+1); });
   }
+  // 他の矢印の通り道をふさぐ数（多いほど順番の読み合いが深くなる）
+  const blocks = cells => cells.reduce((s,c)=>s+(rayHit.get(ck(c))||0),0);
   for(let pass=0;pass<4;pass++){
     let placed=0;
     for(const start of shuffle(allSurface(N))){
@@ -194,7 +198,9 @@ function generateOnce(N, seed){
         if(path.length<2) continue;
         for(const cand of [path, path.slice().reverse()]){
           if(!clearFor(cand)) continue;
-          const sc=rayCells(cand[cand.length-1],headDir(cand),N).length*3+cand.length+r();
+          const rl=rayCells(cand[cand.length-1],headDir(cand),N).length;
+          if(rl<2) continue; // 頭が端ぎりぎりで外向き＝いつでも抜ける矢印は作らない
+          const sc=rl*2+cand.length+blocks(cand)*5+r()*2;
           if(sc>bestScore){ bestScore=sc; best=cand; }
         }
       }
@@ -217,7 +223,8 @@ function analyze(N, arrows){
 // 何通りか作って、いちばん歯ごたえのある配置を採用
 function generate(stage){
   const N=sizeFor(stage); let best=null;
-  for(let k=0;k<24;k++){
+  const K = N>=9 ? 10 : N>=7 ? 14 : 18;
+  for(let k=0;k<K;k++){
     const g=generateOnce(N, stage*7919+k*104729+3), m=analyze(N,g.arrows);
     if(!m) continue;
     const score=m.depth*2 - m.ratio*20 + g.arrows.reduce((s,a)=>s+a.cells.length,0)/(6*N*N)*4;
@@ -236,7 +243,7 @@ function firstBlock(arrow, occ, N){
 // ===== 描画・操作 =====
 const T = THREE;
 const V = d => new T.Vector3(DIRS[d][0],DIRS[d][1],DIRS[d][2]);
-const W = 0.17, H = 0.05, LIFT = 0.004;      // 矢印の太さ・厚み・浮かせ
+const W = 0.15, H = 0.05, LIFT = 0.004;      // 矢印の太さ・厚み・浮かせ
 const COL = { ink:0x1E2638, move:0x2F5BEA, miss:0xE0474C, block:0xE9A020 };
 
 // ---------- three.js ----------
@@ -268,9 +275,7 @@ new ResizeObserver(resize).observe(stageEl);
 function faceTexture(N){
   const S=512, c=document.createElement('canvas'); c.width=c.height=S; const g=c.getContext('2d'), u=S/N;
   g.fillStyle='#F8F9F5'; g.fillRect(0,0,S,S);
-  g.strokeStyle='rgba(30,38,56,.07)'; g.lineWidth=2;
-  for(let i=1;i<N;i++){ g.beginPath(); g.moveTo(i*u,0); g.lineTo(i*u,S); g.moveTo(0,i*u); g.lineTo(S,i*u); g.stroke(); }
-  g.fillStyle='rgba(30,38,56,.16)';
+  g.fillStyle='rgba(30,38,56,.12)';
   for(let i=0;i<N;i++)for(let j=0;j<N;j++){ g.beginPath(); g.arc((i+.5)*u,(j+.5)*u,Math.max(2.5,u*0.035),0,Math.PI*2); g.fill(); }
   const t=new T.CanvasTexture(c); t.anisotropy=8; if(T.SRGBColorSpace) t.colorSpace=T.SRGBColorSpace; return t;
 }
@@ -319,32 +324,31 @@ function drawArrow(a,s,mat){
 
 // ---------- 音（WebAudioで合成：ファイル不要でオフラインでも鳴る） ----------
 const SND=(()=>{
-  let ctx=null, on=true;
+  let ctx=null, out=null, on=true;
   try{ on=localStorage.getItem('arrowcube.sound')!=='off'; }catch(e){}
-  function ac(){ if(!ctx){ const C=window.AudioContext||window.webkitAudioContext; if(!C) return null; ctx=new C(); }
-    if(ctx.state==='suspended') ctx.resume(); return ctx; }
-  function tone(type,f0,f1,dur,vol,delay=0){
+  // ドレミの「ペンタトニック」：続けて抜くと1音ずつ上がる
+  const SCALE=[523.25,587.33,659.25,783.99,880,1046.5,1174.66,1318.51,1567.98,1760];
+  function ac(){
+    if(!ctx){ const C=window.AudioContext||window.webkitAudioContext; if(!C) return null; ctx=new C();
+      const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=3200; lp.Q.value=0.5;
+      out=ctx.createGain(); out.gain.value=0.9; out.connect(lp); lp.connect(ctx.destination); }
+    if(ctx.state==='suspended') ctx.resume(); return ctx;
+  }
+  // やわらかい音：立ち上がりを少しだけなだらかにして、余韻をすっと消す
+  function tone(f0,f1,dur,vol,delay=0,type='sine'){
     const c=ac(); if(!c||!on) return; const t=c.currentTime+delay;
     const o=c.createOscillator(), g=c.createGain(); o.type=type;
-    o.frequency.setValueAtTime(f0,t); o.frequency.exponentialRampToValueAtTime(f1,t+dur);
-    g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(vol,t+0.008); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
-    o.connect(g).connect(c.destination); o.start(t); o.stop(t+dur+0.02);
-  }
-  function noise(dur,vol,freq){
-    const c=ac(); if(!c||!on) return; const t=c.currentTime;
-    const b=c.createBuffer(1,Math.floor(c.sampleRate*dur),c.sampleRate), d=b.getChannelData(0);
-    for(let i=0;i<d.length;i++) d[i]=(Math.random()*2-1)*(1-i/d.length);
-    const s=c.createBufferSource(), f=c.createBiquadFilter(), g=c.createGain();
-    f.type='bandpass'; f.frequency.setValueAtTime(freq,t); f.frequency.exponentialRampToValueAtTime(freq*3,t+dur); f.Q.value=0.8;
-    g.gain.value=vol; s.buffer=b; s.connect(f).connect(g).connect(c.destination); s.start(t);
+    o.frequency.setValueAtTime(f0,t); if(f1!==f0) o.frequency.exponentialRampToValueAtTime(f1,t+dur*0.6);
+    g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(vol,t+0.012); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.connect(g); g.connect(out); o.start(t); o.stop(t+dur+0.05);
   }
   return {
     unlock(){ ac(); },
     get on(){ return on; },
     toggle(){ on=!on; try{ localStorage.setItem('arrowcube.sound',on?'on':'off'); }catch(e){} if(on) this.fly(0); return on; },
-    fly(combo){ const k=Math.pow(2,Math.min(combo,12)/12); tone('sine',420*k,1250*k,0.16,0.22); noise(0.18,0.12,900); },
-    miss(){ tone('triangle',170,80,0.18,0.35); tone('square',90,60,0.07,0.05); },
-    clear(){ [523,659,784,1047].forEach((f,i)=>tone('triangle',f,f*1.002,i===3?0.5:0.18,0.22,i*0.11)); }
+    fly(combo){ const f=SCALE[Math.min(combo,SCALE.length-1)]; tone(f*0.75,f,0.22,0.22); tone(f*2,f*2,0.14,0.04,0.01); },
+    miss(){ tone(196,130.8,0.24,0.26); },
+    clear(){ [523.25,659.25,783.99,1046.5].forEach((f,i)=>{ tone(f,f,i===3?0.9:0.35,0.2,i*0.12); tone(f*2,f*2,i===3?0.6:0.2,0.03,i*0.12); }); }
   };
 })();
 
@@ -468,6 +472,7 @@ document.getElementById('btnNext').onclick=()=>startStage(S.stage+1);
 document.getElementById('btnPrev').onclick=()=>startStage(Math.max(1,S.stage-1));
 
 try{ startStage(load()); resize(); requestAnimationFrame(loop); }catch(err){ window.__acShowError&&window.__acShowError('起動時: '+err.message+' / '+(err.stack||'').split(String.fromCharCode(10)).slice(0,4).join(' / ')); }
+
 
 })();
 </script>
