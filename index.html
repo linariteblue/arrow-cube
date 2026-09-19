@@ -159,9 +159,9 @@ function allSurface(N){
 function rng(seed){ return function(){ seed|=0; seed=seed+0x6D2B79F5|0; let t=Math.imul(seed^seed>>>15,1|seed);
   t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
 
-// ステージが進むほど面が広く（最大12×12）、矢印の「逃げ道」が長くなる＝読み合いが深くなる
-const sizeFor = s => Math.min(12, 6+Math.floor((s-1)/2));
-const minRayFor = (s,N) => Math.min(Math.floor(N/3), 2+Math.floor((s-1)/5));
+// ステージが進むほど面が広く（10×10から最大16×16）、矢印の「逃げ道」が長くなる＝読み合いが深くなる
+const sizeFor = s => Math.min(16, 10+Math.floor((s-1)/2));
+const minRayFor = (s,N) => Math.min(Math.floor(N/3), 3+Math.floor((s-1)/4));
 
 // 必ず解ける配置：あとで消す順の「逆順」に矢印を置いていく。
 // 新しく置く矢印は、頭の前方（面の端まで）が空いているときだけ置ける。
@@ -236,7 +236,7 @@ function analyze(N, arrows){
 // 何通りか作って、いちばん歯ごたえのある配置を採用
 function generate(stage){
   const N=sizeFor(stage), minRay=minRayFor(stage,N); let best=null;
-  const K = N>=11 ? 6 : N>=9 ? 9 : N>=7 ? 14 : 18;
+  const K = N>=14 ? 3 : N>=12 ? 4 : 6;
   for(let k=0;k<K;k++){
     const g=generateOnce(N, stage*7919+k*104729+3, minRay), m=analyze(N,g.arrows);
     if(!m) continue;
