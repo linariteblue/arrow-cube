@@ -65,7 +65,14 @@
   .card h2{margin:0;font-size:30px;font-weight:900;letter-spacing:.08em}
   .card p{margin:0;color:var(--ink-soft);font-variant-numeric:tabular-nums}
   .card .row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
-  @media (prefers-reduced-motion: reduce){ button:active{transform:none} }
+  .stars{display:flex;gap:6px;justify-content:center;margin-top:-4px}
+  .star{font-size:40px;line-height:1;color:#D5DCD2;transform:scale(0);animation:starpop .45s cubic-bezier(.2,1.6,.4,1) forwards}
+  .star.on{color:#F2B600;text-shadow:0 2px 0 #B8860B}
+  @keyframes starpop{0%{transform:scale(0) rotate(-40deg)}100%{transform:scale(1) rotate(0)}}
+  #fx{position:absolute;left:50%;top:45%;width:0;height:0;pointer-events:none;z-index:5}
+  .spark{position:absolute;left:0;top:0;opacity:0;transform:translate(-50%,-50%);animation:spark 1.3s cubic-bezier(.15,.7,.3,1) forwards}
+  @keyframes spark{0%{opacity:1;transform:translate(-50%,-50%) scale(.4)}70%{opacity:1}100%{opacity:0;transform:translate(calc(-50% + var(--dx)),calc(-50% + var(--dy) + 60px)) rotate(var(--rot)) scale(1)}}
+  @media (prefers-reduced-motion: reduce){ button:active{transform:none} .star{animation:none;transform:none} }
 </style>
 </head>
 <body>
@@ -80,8 +87,10 @@
   </header>
   <div id="stage">
     <canvas id="cv" aria-label="矢印キューブのプレイ画面"></canvas>
+    <div id="fx" aria-hidden="true"></div>
     <div id="clear" hidden>
       <div class="card">
+        <div id="stars" class="stars" aria-label="評価"></div>
         <h2>クリア！</h2>
         <p id="clearMsg"></p>
         <div class="row">
@@ -150,12 +159,13 @@ function allSurface(N){
 function rng(seed){ return function(){ seed|=0; seed=seed+0x6D2B79F5|0; let t=Math.imul(seed^seed>>>15,1|seed);
   t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
 
-const STAGE_N = [6,6,7,7,8,8,9,9,10];
-const sizeFor = s => STAGE_N[Math.min(s-1, STAGE_N.length-1)];
+// ステージが進むほど面が広く（最大12×12）、矢印の「逃げ道」が長くなる＝読み合いが深くなる
+const sizeFor = s => Math.min(12, 6+Math.floor((s-1)/2));
+const minRayFor = (s,N) => Math.min(Math.floor(N/3), 2+Math.floor((s-1)/5));
 
 // 必ず解ける配置：あとで消す順の「逆順」に矢印を置いていく。
 // 新しく置く矢印は、頭の前方（面の端まで）が空いているときだけ置ける。
-function generateOnce(N, seed){
+function generateOnce(N, seed, minRay){
   const r=rng(seed);
   const occ=new Map(), arrows=[];
   const shuffle=a=>{ for(let i=a.length-1;i>0;i--){ const j=Math.floor(r()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; };
@@ -186,7 +196,10 @@ function generateOnce(N, seed){
   }
   // 他の矢印の通り道をふさぐ数（多いほど順番の読み合いが深くなる）
   const blocks = cells => cells.reduce((s,c)=>s+(rayHit.get(ck(c))||0),0);
-  for(let pass=0;pass<4;pass++){
+  // 最後の2周はすき間埋め：逃げ道の条件を少しゆるめて空白を減らす（埋めた矢印が他の通り道もふさぐ）
+  const PASSES=6;
+  for(let pass=0;pass<PASSES;pass++){
+    const need = pass>=PASSES-2 ? Math.min(minRay,2) : minRay;
     let placed=0;
     for(const start of shuffle(allSurface(N))){
       if(occ.has(ck(start))) continue;
@@ -199,14 +212,14 @@ function generateOnce(N, seed){
         for(const cand of [path, path.slice().reverse()]){
           if(!clearFor(cand)) continue;
           const rl=rayCells(cand[cand.length-1],headDir(cand),N).length;
-          if(rl<2) continue; // 頭が端ぎりぎりで外向き＝いつでも抜ける矢印は作らない
+          if(rl<need) continue; // 頭が端ぎりぎりで外向き＝いつでも抜ける矢印は作らない
           const sc=rl*2+cand.length+blocks(cand)*5+r()*2;
           if(sc>bestScore){ bestScore=sc; best=cand; }
         }
       }
       if(best){ place(best); placed++; }
     }
-    if(!placed) break;
+    if(!placed && pass<PASSES-2) pass=PASSES-3;
   }
   return {N, arrows};
 }
@@ -222,10 +235,10 @@ function analyze(N, arrows){
 }
 // 何通りか作って、いちばん歯ごたえのある配置を採用
 function generate(stage){
-  const N=sizeFor(stage); let best=null;
-  const K = N>=9 ? 10 : N>=7 ? 14 : 18;
+  const N=sizeFor(stage), minRay=minRayFor(stage,N); let best=null;
+  const K = N>=11 ? 6 : N>=9 ? 9 : N>=7 ? 14 : 18;
   for(let k=0;k<K;k++){
-    const g=generateOnce(N, stage*7919+k*104729+3), m=analyze(N,g.arrows);
+    const g=generateOnce(N, stage*7919+k*104729+3, minRay), m=analyze(N,g.arrows);
     if(!m) continue;
     const score=m.depth*2 - m.ratio*20 + g.arrows.reduce((s,a)=>s+a.cells.length,0)/(6*N*N)*4;
     if(!best||score>best.score) best={...g,score,m};
@@ -324,12 +337,11 @@ function drawArrow(a,s,mat){
 const SND=(()=>{
   let ctx=null, out=null, on=true;
   try{ on=localStorage.getItem('arrowcube.sound')!=='off'; }catch(e){}
-  // ドレミの「ペンタトニック」：続けて抜くと1音ずつ上がる
-  const SCALE=[523.25,587.33,659.25,783.99,880,1046.5,1174.66,1318.51,1567.98,1760];
   function ac(){
     if(!ctx){ const C=window.AudioContext||window.webkitAudioContext; if(!C) return null; ctx=new C();
       const lp=ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=3200; lp.Q.value=0.5;
-      out=ctx.createGain(); out.gain.value=0.9; out.connect(lp); lp.connect(ctx.destination); }
+      const comp=ctx.createDynamicsCompressor(); comp.threshold.value=-10; comp.ratio.value=4;
+      out=ctx.createGain(); out.gain.value=1.9; out.connect(lp); lp.connect(comp); comp.connect(ctx.destination); }
     if(ctx.state==='suspended') ctx.resume(); return ctx;
   }
   // やわらかい音：立ち上がりを少しだけなだらかにして、余韻をすっと消す
@@ -344,8 +356,9 @@ const SND=(()=>{
     unlock(){ ac(); },
     get on(){ return on; },
     toggle(){ on=!on; try{ localStorage.setItem('arrowcube.sound',on?'on':'off'); }catch(e){} if(on) this.fly(0); return on; },
-    fly(combo){ const f=SCALE[Math.min(combo,SCALE.length-1)]; tone(f*0.75,f,0.22,0.22); tone(f*2,f*2,0.14,0.04,0.01); },
-    miss(){ tone(196,130.8,0.24,0.26); },
+    fly(){ const f=659.25; tone(f*0.75,f,0.2,0.3); tone(f*2,f*2,0.12,0.05,0.01); },
+    miss(){ tone(196,130.8,0.24,0.34); },
+    star(i){ const f=[783.99,987.77,1174.66][i]; tone(f,f,0.4,0.22); tone(f*2,f*2,0.25,0.04); },
     clear(){ [523.25,659.25,783.99,1046.5].forEach((f,i)=>{ tone(f,f,i===3?0.9:0.35,0.2,i*0.12); tone(f*2,f*2,i===3?0.6:0.2,0.03,i*0.12); }); }
   };
 })();
@@ -384,15 +397,38 @@ function tapArrow(a){
     drawArrow(blk,blk.s,MAT.block); blk.flash=0.5;
     return;
   }
-  SND.fly(S.combo++); a.gone=true; S.left--; a.cells.forEach(c=>S.occ.delete(ck(c)));
+  SND.fly(); a.gone=true; S.left--; a.cells.forEach(c=>S.occ.delete(ck(c)));
   const mat=MAT.move.clone(); mat.transparent=true;
   anims.set(a.id,{type:'fly',a,t:0,s0:a.s,mat});
   updateUI();
-  if(S.left===0) setTimeout(showClear,700);
+  if(S.left===0) setTimeout(showClear,450);
 }
+// ミス0で星3つ、2回までなら星2つ、それ以上は星1つ
+const starsFor = miss => miss===0 ? 3 : miss<=2 ? 2 : 1;
 function showClear(){
+  const n=starsFor(S.miss);
   ui.clearMsg.textContent='矢印'+S.total+'本ぜんぶ抜けた！　ミス '+S.miss+' 回'+(S.miss===0?'　パーフェクト！':'');
-  ui.clear.hidden=false; save(S.stage+1); SND.clear(); document.getElementById('btnNext').focus({preventScroll:true});
+  const box=document.getElementById('stars'); box.innerHTML='';
+  for(let i=0;i<3;i++){ const e=document.createElement('span'); e.className='star'+(i<n?' on':''); e.textContent='★'; e.style.animationDelay=(0.15+i*0.22)+'s'; box.appendChild(e); }
+  ui.clear.hidden=false; save(S.stage+1); SND.clear();
+  for(let i=0;i<n;i++) setTimeout(()=>SND.star(i),450+i*220);
+  burst(n);
+  document.getElementById('btnNext').focus({preventScroll:true});
+}
+// 画面中央から星が飛び散る
+function burst(n){
+  if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const layer=document.getElementById('fx'), cols=['#F2B600','#2F5BEA','#E0474C','#F2B600','#7FB069'];
+  for(let i=0;i<14+n*8;i++){
+    const e=document.createElement('span'); e.className='spark'; e.textContent='★';
+    const ang=Math.random()*Math.PI*2, dist=110+Math.random()*170;
+    e.style.setProperty('--dx',(Math.cos(ang)*dist).toFixed(0)+'px');
+    e.style.setProperty('--dy',(Math.sin(ang)*dist-40).toFixed(0)+'px');
+    e.style.setProperty('--rot',(Math.random()*540-270).toFixed(0)+'deg');
+    e.style.color=cols[i%cols.length]; e.style.fontSize=(12+Math.random()*16).toFixed(0)+'px';
+    e.style.animationDelay=(Math.random()*0.25).toFixed(2)+'s';
+    layer.appendChild(e); setTimeout(()=>e.remove(),1700);
+  }
 }
 function vibrate(ms){ try{ navigator.vibrate&&navigator.vibrate(ms); }catch(e){} }
 
@@ -403,13 +439,13 @@ function loop(now){
   for(const [id,an] of anims){
     const a=an.a; an.t+=dt;
     if(an.type==='fly'){
-      a.s=an.s0+5*an.t+26*an.t*an.t;
+      a.s=an.s0+14*an.t+70*an.t*an.t;
       const rest=a.end-a.L-a.s; an.mat.opacity=Math.max(0,Math.min(1,rest/(N*1.2)));
       if(a.s>=a.end-a.L){ group.remove(a.obj); an.mat.dispose(); anims.delete(id); continue; }
       drawArrow(a,a.s,an.mat);
     } else { // bump: 前へ進んでぶつかって戻る
-      const sp=14, out=an.max/sp, tot=out*2+0.12;
-      a.s = an.t<out ? an.t*sp : an.t<out+0.12 ? an.max : Math.max(0,an.max-(an.t-out-0.12)*sp);
+      const sp=24, out=an.max/sp, tot=out*2+0.08;
+      a.s = an.t<out ? an.t*sp : an.t<out+0.08 ? an.max : Math.max(0,an.max-(an.t-out-0.08)*sp);
       drawArrow(a,a.s,MAT.miss);
       if(an.t>=tot){ a.s=0; drawArrow(a,0,MAT.ink); anims.delete(id);
         const b=an.blk; if(!b.gone&&!anims.has(b.id)) drawArrow(b,b.s,MAT.ink); }
@@ -464,10 +500,12 @@ function pick(cx,cy){
 const btnSound=document.getElementById('btnSound');
 const paintSound=()=>{ btnSound.textContent=SND.on?'音 ON':'音 OFF'; btnSound.setAttribute('aria-pressed',String(SND.on)); };
 btnSound.onclick=()=>{ SND.toggle(); paintSound(); }; paintSound();
-document.getElementById('btnRetry').onclick=()=>startStage(S.stage);
-document.getElementById('btnRetry2').onclick=()=>startStage(S.stage);
-document.getElementById('btnNext').onclick=()=>startStage(S.stage+1);
-document.getElementById('btnPrev').onclick=()=>startStage(Math.max(1,S.stage-1));
+// ステージ作成に少し時間がかかるので、先に「…」を出してから作る
+function go(n){ ui.clear.hidden=true; ui.stage.textContent=n; ui.left.textContent='…'; setTimeout(()=>startStage(n),30); }
+document.getElementById('btnRetry').onclick=()=>go(S.stage);
+document.getElementById('btnRetry2').onclick=()=>go(S.stage);
+document.getElementById('btnNext').onclick=()=>go(S.stage+1);
+document.getElementById('btnPrev').onclick=()=>go(Math.max(1,S.stage-1));
 
 try{ startStage(load()); resize(); requestAnimationFrame(loop); }catch(err){ window.__acShowError&&window.__acShowError('起動時: '+err.message+' / '+(err.stack||'').split(String.fromCharCode(10)).slice(0,4).join(' / ')); }
 
