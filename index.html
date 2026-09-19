@@ -74,6 +74,44 @@
   #fx{position:absolute;left:50%;top:45%;width:0;height:0;pointer-events:none;z-index:5}
   .spark{position:absolute;left:0;top:0;opacity:0;transform:translate(-50%,-50%);animation:spark 1.3s cubic-bezier(.15,.7,.3,1) forwards}
   @keyframes spark{0%{opacity:1;transform:translate(-50%,-50%) scale(.4)}70%{opacity:1}100%{opacity:0;transform:translate(calc(-50% + var(--dx)),calc(-50% + var(--dy) + 60px)) rotate(var(--rot)) scale(1)}}
+  /* マップ */
+  #map{position:absolute;inset:0;z-index:6;background:var(--ground);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:24px 16px}
+  .map-head{position:absolute;top:14px;left:16px;right:16px;display:flex;align-items:center;justify-content:space-between}
+  .map-head h2{margin:0;font-size:18px;font-weight:900;letter-spacing:.1em}
+  .map-track{position:relative;width:100%;max-width:520px;height:120px}
+  #mapRow{position:absolute;left:0;right:0;top:56px;height:0}
+  .seg{position:absolute;top:-1px;height:2px;background:transparent}
+  .seg.done{background:var(--ink)}
+  .seg.todo{background-image:linear-gradient(90deg,var(--ink-soft) 50%,transparent 50%);background-size:8px 2px;opacity:.45}
+  .seg.todo::after{content:"";position:absolute;left:0;top:0;height:2px;width:0;background:var(--ink);transition:width .9s cubic-bezier(.45,0,.2,1)}
+  .seg.todo.fill{opacity:1;background-image:linear-gradient(90deg,rgba(91,103,128,.45) 50%,transparent 50%)}
+  .seg.todo.fill::after{width:100%}
+  .seg.tail{opacity:.3}
+  .node{position:absolute;top:0;transform:translate(-50%,-50%);border:0;background:none;padding:0;box-shadow:none;width:44px;height:44px;display:grid;place-items:center;cursor:pointer}
+  .node:active{transform:translate(-50%,-50%)}
+  .node .dot{display:block;width:18px;height:18px;border-radius:50%;box-sizing:border-box;border:2px solid var(--ink-soft);background:var(--ground);opacity:.55;transition:all .3s}
+  .node .num{position:absolute;top:40px;left:50%;transform:translateX(-50%);font-size:12px;color:var(--ink-soft);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .node.done .dot{opacity:1;border:0;background:var(--ink);width:18px;height:18px;position:relative}
+  .node.done .dot::after{content:"";position:absolute;left:6px;top:3px;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+  .node.done .num{color:var(--ink)}
+  .node.now .dot{opacity:1;width:26px;height:26px;border:3px solid var(--accent);background:#fff;box-shadow:0 0 0 6px rgba(47,91,234,.15)}
+  .node.now .num{color:var(--accent);font-weight:900;font-size:14px}
+  .node.pick .dot{box-shadow:0 0 0 5px rgba(242,182,0,.35)}
+  .node.pop .dot{animation:pop .45s cubic-bezier(.2,1.6,.4,1)}
+  .node.arrive .dot{animation:arrive .6s cubic-bezier(.2,1.6,.4,1), breathe 2.4s 0.6s ease-in-out infinite}
+  .node.now:not(.arrive) .dot{animation:breathe 2.4s ease-in-out infinite}
+  @keyframes pop{0%{transform:scale(.4)}100%{transform:scale(1)}}
+  @keyframes arrive{0%{transform:scale(.5)}100%{transform:scale(1)}}
+  @keyframes breathe{0%,100%{box-shadow:0 0 0 6px rgba(47,91,234,.15)}50%{box-shadow:0 0 0 11px rgba(47,91,234,.06)}}
+  #mapMarker{position:absolute;top:6px;left:0;transform:translateX(-50%);pointer-events:none}
+  #mapMarker span{display:block;font-size:11px;font-weight:700;color:#fff;background:var(--accent);border-radius:999px;padding:3px 9px;white-space:nowrap;position:relative}
+  #mapMarker span::after{content:"";position:absolute;left:50%;bottom:-5px;transform:translateX(-50%);border:5px solid transparent;border-bottom:0;border-top-color:var(--accent)}
+  #mapMsg{margin:0;font-size:15px;font-weight:700;min-height:1.4em;text-align:center}
+  #mapGo.wait{opacity:.35;pointer-events:none}
+  .map-legend{display:flex;gap:14px;font-size:11px;color:var(--ink-soft)}
+  .map-legend span{display:flex;align-items:center;gap:5px}
+  .lg{display:inline-block;width:10px;height:10px;border-radius:50%;box-sizing:border-box}
+  .lg.done{background:var(--ink)} .lg.now{border:2px solid var(--accent);background:#fff} .lg.todo{border:1.5px solid var(--ink-soft);opacity:.6}
   @media (prefers-reduced-motion: reduce){ button:active{transform:none} .star{animation:none;transform:none} }
 </style>
 </head>
@@ -89,6 +127,16 @@
   <div id="stage">
     <canvas id="cv" aria-label="やぬきのプレイ画面"></canvas>
     <div id="fx" aria-hidden="true"></div>
+    <div id="map" hidden>
+      <div class="map-head"><h2>マップ</h2><button id="mapClose" type="button">もどる</button></div>
+      <div class="map-track">
+        <div id="mapRow"></div>
+        <div id="mapMarker" aria-hidden="true"><span>いまここ</span></div>
+      </div>
+      <p id="mapMsg"></p>
+      <button id="mapGo" class="primary" type="button">つづきをあそぶ</button>
+      <div class="map-legend"><span><i class="lg done"></i>クリア</span><span><i class="lg now"></i>いまここ</span><span><i class="lg todo"></i>これから</span></div>
+    </div>
     <div id="clear" hidden>
       <div class="card">
         <div id="stars" class="stars" aria-label="評価"></div>
@@ -105,7 +153,7 @@
     <div class="hint">タップ：矢印を抜く ／ ドラッグ：回転 ／ ピンチ・ホイール：拡大縮小</div>
     <button id="btnSound" type="button">音 ON</button>
     <button id="btnHint" type="button">ヒント OFF</button>
-    <button id="btnPrev" type="button">◀ 前</button>
+    <button id="btnMap" type="button">マップ</button>
     <button id="btnRetry" type="button">やり直し</button>
   </footer>
 </div>
@@ -469,8 +517,19 @@ function save(n){ try{ localStorage.setItem(KEY,String(n)); }catch(e){} }
 const newSeed=()=>(Math.floor(Math.random()*2147483647)^(Date.now()&0x7fffffff))>>>0;
 function loadSeed(){ try{ const v=parseInt(localStorage.getItem(SEEDKEY)); return isNaN(v)?null:v; }catch(e){ return null; } }
 function saveSeed(v){ try{ localStorage.setItem(SEEDKEY,String(v)); }catch(e){} }
+// 自動保存：ステージ番号・盤面の種・抜いた矢印の番号。種が同じなら盤面はまったく同じに作れるので、抜いた矢印を消し直せば途中から再開できる
+const PKEY='arrowcube.progress', CKEY='arrowcube.cleared', GENV=1;
+function loadProgress(){
+  try{ const p=JSON.parse(localStorage.getItem(PKEY)); if(p&&p.stage) return {stage:p.stage, seed:p.seed, gone:(p.v===GENV&&Array.isArray(p.gone))?p.gone:[]}; }catch(e){}
+  return {stage:load(), seed:loadSeed(), gone:[]};
+}
+function saveProgress(stage, seed, gone){ try{ localStorage.setItem(PKEY, JSON.stringify({v:GENV, stage, seed, gone})); }catch(e){} }
+function saveNow(){ if(S) saveProgress(S.stage, S.seed, S.arrows.filter(a=>a.gone).map(a=>a.id)); }
+// クリア済みの一番先のステージ（はじめて使うときは「今のステージの1つ前まで」をクリア済みとみなす）
+let maxCleared=(()=>{ try{ const v=parseInt(localStorage.getItem(CKEY)); if(!isNaN(v)) return v; }catch(e){} return Math.max(0, load()-1); })();
+function saveCleared(){ try{ localStorage.setItem(CKEY,String(maxCleared)); }catch(e){} }
 
-function startStage(n, seed){
+function startStage(n, seed, gone){
   anims.clear(); hintArrow=null; while(group.children.length) group.remove(group.children[0]);
   if(seed==null) seed=newSeed(); saveSeed(seed);
   const gen=generate(n, seed); N=gen.N;
@@ -486,7 +545,10 @@ function startStage(n, seed){
   instBox.frustumCulled=false; instHead.frustumCulled=false; group.add(instBox); group.add(instHead);
   group.quaternion.setFromEuler(new T.Euler(0.5,-0.72,0,'XYZ')); zoom=1;
   S={stage:n,seed,arrows:gen.arrows,occ,left:gen.arrows.length,miss:0,total:gen.arrows.length,combo:0};
-  ui.clear.hidden=true; save(n); rebuildStatic(); updateUI(); fitCamera(); updateHint();
+  // 保存しておいた「抜いた矢印」を消し直して、途中の盤面を再現
+  if(gone) for(const id of gone){ const a=S.arrows[id]; if(a&&!a.gone){ a.gone=true; S.left--; a.cells.forEach(c=>occ.delete(ck(c))); } }
+  ui.clear.hidden=true; save(n); rebuildStatic(); updateUI(); fitCamera(); updateHint(); saveNow();
+  if(S.left===0) setTimeout(showClear,300);
 }
 // ---------- ヒント：いま抜ける矢印を1本、じんわり光らせる ----------
 MAT.hint=new T.MeshLambertMaterial({color:0xF2B600, emissive:0x000000});
@@ -522,7 +584,7 @@ function tapArrow(a){
   const mat=MAT.move.clone(); mat.transparent=true;
   anims.set(a.id,{type:'fly',a,t:0,s0:a.s,mat}); a.active=true; rebuildStatic();
   if(a===hintArrow){ hintArrow=null; updateHint(); }
-  updateUI();
+  updateUI(); saveNow();
   if(S.left===0) setTimeout(showClear,450);
 }
 // ミス0で星3つ、2回までなら星2つ、それ以上は星1つ
@@ -533,6 +595,8 @@ function showClear(){
   const box=document.getElementById('stars'); box.innerHTML='';
   for(let i=0;i<3;i++){ const e=document.createElement('span'); e.className='star'+(i<n?' on':''); e.textContent='★'; e.style.animationDelay=(0.15+i*0.22)+'s'; box.appendChild(e); }
   ui.clear.hidden=false; save(S.stage+1); SND.clear();
+  maxCleared=Math.max(maxCleared,S.stage); saveCleared();
+  saveProgress(S.stage+1, null, []); // 閉じても次は新しいステージから
   for(let i=0;i<n;i++) setTimeout(()=>SND.star(i),450+i*220);
   burst(n);
   document.getElementById('btnNext').focus({preventScroll:true});
@@ -628,6 +692,67 @@ function pick(cx,cy){
   if(bestId!==undefined) tapArrow(S.arrows[bestId]);
 }
 
+// ---------- マップ：○──○──○ の道と、いまここ ----------
+const mapEl=document.getElementById('map'), mapRow=document.getElementById('mapRow'), mapMarker=document.getElementById('mapMarker'),
+  mapGo=document.getElementById('mapGo'), mapMsg=document.getElementById('mapMsg');
+let mapTimers=[];
+function nodeState(n, cur){ return n===cur ? 'now' : n<=maxCleared ? 'done' : 'todo'; }
+// cur を中心あたりにして前後のノードを並べる（無限なので終点はつくらない）
+function renderMap(cur, focus){
+  const W=mapRow.clientWidth||320, COUNT=7, from=Math.max(1, focus-3), gap=W/COUNT;
+  mapRow.innerHTML='';
+  const xs=[];
+  for(let i=0;i<COUNT;i++){ xs.push(gap*(i+0.5)); }
+  for(let i=0;i<COUNT-1;i++){ const n=from+i, seg=document.createElement('div');
+    seg.className='seg '+(n+1<=Math.max(cur,maxCleared) ? 'done':'todo'); /* 歩いてきた道は実線、これからの道は点線 */ seg.dataset.n=n;
+    seg.style.left=xs[i]+'px'; seg.style.width=gap+'px'; mapRow.appendChild(seg); }
+  // 右端の先にも道が続いている印
+  const tail=document.createElement('div'); tail.className='seg todo tail'; tail.style.left=xs[COUNT-1]+'px'; tail.style.width=(gap/2)+'px'; mapRow.appendChild(tail);
+  if(from>1){ const head=document.createElement('div'); head.className='seg done tail'; head.style.left='0px'; head.style.width=(gap/2)+'px'; mapRow.appendChild(head); }
+  for(let i=0;i<COUNT;i++){ const n=from+i, b=document.createElement('button');
+    b.type='button'; b.className='node '+nodeState(n,cur); b.dataset.n=n; b.style.left=xs[i]+'px';
+    b.innerHTML='<span class="dot"></span><span class="num">'+n+'</span>';
+    b.setAttribute('aria-label','ステージ'+n+(nodeState(n,cur)==='done'?'（クリア済み）':nodeState(n,cur)==='now'?'（いまここ）':''));
+    b.onclick=()=>onNode(n); mapRow.appendChild(b); }
+  return {xs, from};
+}
+function placeMarker(layout, n, animate){
+  mapMarker.style.transition=animate?'left .9s cubic-bezier(.45,0,.2,1)':'none';
+  mapMarker.style.left=layout.xs[n-layout.from]+'px';
+}
+let mapNext=null; // マップから始めるステージ
+function onNode(n){
+  if(!mapEl.classList.contains('ready')) return;
+  if(n===mapNext){ startFromMap(); return; }
+  if(n<=maxCleared){ mapNext=n; mapGo.textContent='ステージ '+n+' をあそぶ'; mapMsg.textContent='クリア済みのステージをもう一度あそべるよ'; 
+    mapRow.querySelectorAll('.node').forEach(el=>el.classList.toggle('pick', +el.dataset.n===n)); }
+}
+function startFromMap(){ closeMap(); if(mapNext===S.stage && S.left>0) return; go(mapNext); }
+function closeMap(){ mapTimers.forEach(clearTimeout); mapTimers=[]; mapEl.hidden=true; mapEl.classList.remove('ready'); }
+// いつでも開けるマップ（今のステージから動かない）
+function openMap(){
+  closeMap(); ui.clear.hidden=true; mapEl.hidden=false; mapNext=S.stage;
+  const L=renderMap(S.stage, S.stage); placeMarker(L, S.stage, false);
+  mapGo.textContent='つづきをあそぶ'; mapMsg.textContent='ステージ '+S.stage+' をあそんでいるところ';
+  mapEl.classList.add('ready');
+}
+// クリア後：クリアしたノードに✓がつき、現在地が次のノードへ進む
+function openMapAfterClear(){
+  closeMap(); ui.clear.hidden=true; mapEl.hidden=false;
+  const from=S.stage, to=S.stage+1; mapNext=to;
+  const L=renderMap(from, from); placeMarker(L, from, false);
+  mapGo.textContent='ステージ '+to+' へ'; mapGo.classList.add('wait'); mapMsg.textContent='ステージ '+from+' クリア！';
+  const node=n=>mapRow.querySelector('.node[data-n="'+n+'"]'), seg=mapRow.querySelector('.seg[data-n="'+from+'"]');
+  mapTimers.push(setTimeout(()=>{ const a=node(from); if(a){ a.className='node done pop'; } SND.star(0); },350));
+  mapTimers.push(setTimeout(()=>{ if(seg) seg.classList.add('fill'); placeMarker(L, to, true); },750));
+  mapTimers.push(setTimeout(()=>{ const b=node(to); if(b){ b.className='node now arrive'; } SND.star(2); mapMsg.textContent='つぎは ステージ '+to;
+    mapGo.classList.remove('wait'); mapEl.classList.add('ready'); },1650));
+}
+mapGo.onclick=()=>{ if(mapEl.classList.contains('ready')) startFromMap(); };
+document.getElementById('mapClose').onclick=()=>{ if(mapNext===S.stage+1 && S.left===0) startFromMap(); else closeMap(); };
+document.getElementById('btnMap').onclick=()=>openMap();
+addEventListener('resize',()=>{ if(!mapEl.hidden && mapEl.classList.contains('ready')){ const L=renderMap(mapNext===S.stage+1&&S.left===0?S.stage+1:S.stage, mapNext===S.stage+1&&S.left===0?S.stage:S.stage); placeMarker(L, mapNext, false); } });
+
 // ---------- ボタン ----------
 const btnSound=document.getElementById('btnSound');
 const paintSound=()=>{ btnSound.textContent=SND.on?'音 ON':'音 OFF'; btnSound.setAttribute('aria-pressed',String(SND.on)); };
@@ -636,13 +761,12 @@ const btnHint=document.getElementById('btnHint');
 const paintHint=()=>{ btnHint.textContent=hintOn?'ヒント ON':'ヒント OFF'; btnHint.setAttribute('aria-pressed',String(hintOn)); btnHint.classList.toggle('on',hintOn); };
 btnHint.onclick=()=>{ hintOn=!hintOn; try{ localStorage.setItem('arrowcube.hint',hintOn?'on':'off'); }catch(e){} paintHint(); updateHint(); }; paintHint();
 // ステージ作成に少し時間がかかるので、先に「…」を出してから作る。seed を渡すと同じ配置
-function go(n, seed){ ui.clear.hidden=true; ui.stage.textContent=n; ui.left.textContent='…'; setTimeout(()=>startStage(n, seed),30); }
+function go(n, seed){ closeMap(); ui.clear.hidden=true; ui.stage.textContent=n; ui.left.textContent='…'; setTimeout(()=>startStage(n, seed),30); }
 document.getElementById('btnRetry').onclick=()=>go(S.stage, S.seed);
 document.getElementById('btnRetry2').onclick=()=>go(S.stage, S.seed);
-document.getElementById('btnNext').onclick=()=>go(S.stage+1);
-document.getElementById('btnPrev').onclick=()=>go(Math.max(1,S.stage-1));
+document.getElementById('btnNext').onclick=()=>openMapAfterClear();
 
-try{ startStage(load(), loadSeed()); resize(); requestAnimationFrame(loop); }catch(err){ window.__acShowError&&window.__acShowError('起動時: '+err.message+' / '+(err.stack||'').split(String.fromCharCode(10)).slice(0,4).join(' / ')); }
+try{ const P=loadProgress(); startStage(P.stage, P.seed, P.gone); resize(); requestAnimationFrame(loop); }catch(err){ window.__acShowError&&window.__acShowError('起動時: '+err.message+' / '+(err.stack||'').split(String.fromCharCode(10)).slice(0,4).join(' / ')); }
 
 
 })();
