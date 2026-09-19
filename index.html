@@ -204,7 +204,7 @@ function generateOnce(N, seed, minRay, opt={}){
     for(const c of cells){ const ids=freeRay.get(ck(c)); if(ids) for(const f of ids) if(free.has(f)) out.add(f); }
     return out; };
   // 最後の2周はすき間埋め：逃げ道の条件を少しゆるめて空白を減らす（埋めた矢印が他の通り道もふさぐ）
-  const PASSES=7, shortFill = opt.shortFill ?? true;
+  const PASSES=7, shortFill = opt.shortFill ?? false;
   for(let pass=0;pass<PASSES;pass++){
     const fill = pass>=PASSES-3, last = pass===PASSES-1, need = last && shortFill ? 1 : fill ? Math.min(minRay,2) : minRay;
     let placed=0;
@@ -230,7 +230,75 @@ function generateOnce(N, seed, minRay, opt={}){
     }
     if(!placed && pass<PASSES-3) pass=PASSES-4;
   }
+  if(opt.grow ?? true) densify(N, arrows, r);
   return {N, arrows};
+}
+
+// すき間埋め（後処理）：抜く順番を保ったまま、
+//  (1) 既存の矢印のしっぽを空きマスへ伸ばす
+//  (2) 残った空白に「ほかの矢印にふさがれている」新しい矢印を差し込む
+// どちらも「ふさぐ側は、ふさがれる側より先に抜ける」関係だけを作るので、必ず解けるまま。
+function densify(N, arrows, r){
+  const order=removalOrder(N, arrows); if(!order) return;
+  let pos=new Map(); const reindex=()=>{ pos=new Map(); order.forEach((id,i)=>pos.set(id,i)); }; reindex();
+  const occ=new Map(); arrows.forEach(a=>a.cells.forEach(c=>occ.set(ck(c),a.id)));
+  const rayOf=new Map(), ownRay=[], tailKey=new Map();
+  const addRay=a=>{ const s=new Set(); rayCells(a.cells[a.cells.length-1],a.hd,N).forEach(c=>{ const k=ck(c); s.add(k); if(!rayOf.has(k)) rayOf.set(k,[]); rayOf.get(k).push(a.id); }); ownRay[a.id]=s; };
+  arrows.forEach(a=>{ addRay(a); tailKey.set(ck(a.cells[0]),a.id); });
+  const shuffled=arr=>{ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(r()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } return arr; };
+  const minPosCross=cells=>{ let m=Infinity; for(const c of cells) for(const y of (rayOf.get(ck(c))||[])) m=Math.min(m,pos.get(y)); return m; };
+
+  function growTails(){
+    let grew=false;
+    for(const e of shuffled(allSurface(N).filter(c=>!occ.has(ck(c))))){ const ek=ck(e); if(occ.has(ek)) continue;
+      const crossing=rayOf.get(ek)||[]; let bestX=-1, bestGain=-1;
+      for(const t of tangents(e.n)){ const id=tailKey.get(ck(step(e,t,N).c)); if(id===undefined||ownRay[id].has(ek)) continue;
+        if(!crossing.every(y=>y===id || pos.get(y)>pos.get(id))) continue;
+        const g=crossing.length*3+r(); if(g>bestGain){ bestGain=g; bestX=id; } }
+      if(bestX<0) continue;
+      const a=arrows[bestX]; tailKey.delete(ck(a.cells[0])); a.cells.unshift(e); occ.set(ek,bestX); tailKey.set(ek,bestX); grew=true;
+    }
+    return grew;
+  }
+  function walkEmpty(start,len){
+    const path=[start], set=new Set([ck(start)]); let c=start, t=tangents(start.n)[Math.floor(r()*4)];
+    while(path.length<len){ const opts=shuffled(tangents(c.n).filter(d=>d!==opp(t))); let moved=false;
+      for(const o of opts){ const st=step(c,o,N), k=ck(st.c); if(!occ.has(k)&&!set.has(k)){ path.push(st.c); set.add(k); c=st.c; t=st.t; moved=true; break; } }
+      if(!moved) break; }
+    return path;
+  }
+  function insertArrows(){
+    let added=false;
+    for(const e of shuffled(allSurface(N).filter(c=>!occ.has(ck(c))))){ if(occ.has(ck(e))) continue;
+      let best=null, bestSc=-1;
+      for(let k=0;k<8;k++){
+        const path=walkEmpty(e, 2+Math.floor(r()*Math.max(3,N/2))); if(path.length<2) continue;
+        for(const cand of [path, path.slice().reverse()]){
+          const own=new Set(cand.map(ck)), hd=headDir(cand), ray=rayCells(cand[cand.length-1],hd,N);
+          if(ray.some(c=>own.has(ck(c)))) continue;
+          const W=new Set(); ray.forEach(c=>{ const id=occ.get(ck(c)); if(id!==undefined) W.add(id); });
+          if(!W.size) continue; // 最初から抜けてしまう矢印は作らない
+          let maxW=-1; W.forEach(id=>{ maxW=Math.max(maxW,pos.get(id)); });
+          if(!(maxW < minPosCross(cand))) continue;
+          const sc=W.size*2+cand.length+r(); if(sc>bestSc){ bestSc=sc; best={cand,hd,maxW}; }
+        }
+      }
+      if(!best) continue;
+      const id=arrows.length, a={id,cells:best.cand,hd:best.hd}; arrows.push(a);
+      a.cells.forEach(c=>occ.set(ck(c),id)); addRay(a); tailKey.set(ck(a.cells[0]),id);
+      order.splice(best.maxW+1,0,id); reindex(); added=true;
+    }
+    return added;
+  }
+  for(let round=0; round<8; round++){ const g=growTails(), i=insertArrows(); if(!g&&!i) break; }
+}
+// 抜ける順番を1つ求める（抜けない配置なら null）
+function removalOrder(N, arrows){
+  const occ=new Map(); arrows.forEach(a=>a.cells.forEach(c=>occ.set(ck(c),a.id)));
+  const alive=new Set(arrows.map(a=>a.id)), order=[];
+  while(alive.size){ const free=[...alive].filter(id=>!firstBlock(arrows[id],occ,N)); if(!free.length) return null;
+    free.forEach(id=>{ alive.delete(id); order.push(id); arrows[id].cells.forEach(c=>occ.delete(ck(c))); }); }
+  return order;
 }
 
 // 手詰まりまでの「段数」と最初から抜ける本数を測る
@@ -322,25 +390,40 @@ function pointAt(a,s){
 }
 const _m=new T.Matrix4(), _z=new T.Vector3();
 function orient(mesh,d,n){ _z.crossVectors(d,n); _m.makeBasis(d,n,_z); mesh.quaternion.setFromRotationMatrix(_m); }
-// s: 元の位置からどれだけ進んだか
-function drawArrow(a,s,mat){
-  const g=a.obj; while(g.children.length) g.remove(g.children[0]);
-  const s0=s, s1=s+a.L, A=pointAt(a,s0), B=pointAt(a,s1);
+// 矢印を形づくる部品（棒と頭）の位置・向き・大きさを計算。s: 元の位置からどれだけ進んだか
+function partsOf(a,s){
+  const out=[], s1=s+a.L, A=pointAt(a,s), B=pointAt(a,s1);
   const poly=[A.p], isEdge=[false]; for(let i=A.seg+1;i<=B.seg;i++){ poly.push(a.pts[i]); isEdge.push(a.edges.has(i)); } poly.push(B.p); isEdge.push(false);
   const segN=[]; for(let i=A.seg;i<=B.seg;i++) segN.push(V(a.nrm[i]));
   let lastD=null, lastN=null;
   for(let i=0;i<poly.length-1;i++){
     const d=poly[i+1].clone().sub(poly[i]), len=d.length(); if(len<1e-4) continue; d.normalize();
-    const n=segN[i], m=new T.Mesh(unitBox,mat);
+    const n=segN[i];
     // 角（辺をまたぐ点）では伸ばしすぎない：手前の面側だけ厚みぶん延長して隙間を埋める
     const e0=isEdge[i]?0:W/2, e1=isEdge[i+1]?H:W/2;
-    m.scale.set(len+e0+e1,H,W); orient(m,d,n);
-    m.position.copy(poly[i]).add(poly[i+1]).multiplyScalar(0.5).addScaledVector(d,(e1-e0)/2).addScaledVector(n,H/2);
-    g.add(m); lastD=d; lastN=n;
+    _z.crossVectors(d,n); _m.makeBasis(d,n,_z);
+    out.push({head:false, q:new T.Quaternion().setFromRotationMatrix(_m), sc:new T.Vector3(len+e0+e1,H,W),
+      p:poly[i].clone().add(poly[i+1]).multiplyScalar(0.5).addScaledVector(d,(e1-e0)/2).addScaledVector(n,H/2)});
+    lastD=d; lastN=n;
   }
-  if(lastD){ const h=new T.Mesh(headGeo,mat); orient(h,lastD,lastN); h.position.copy(B.p); g.add(h); }
+  if(lastD){ _z.crossVectors(lastD,lastN); _m.makeBasis(lastD,lastN,_z); out.push({head:true, q:new T.Quaternion().setFromRotationMatrix(_m), sc:new T.Vector3(1,1,1), p:B.p.clone()}); }
+  return out;
 }
-
+// 動いている矢印だけは個別に描く
+function drawArrow(a,s,mat){
+  const g=a.obj; while(g.children.length) g.remove(g.children[0]);
+  for(const pt of partsOf(a,s)){ const m=new T.Mesh(pt.head?headGeo:unitBox,mat); m.position.copy(pt.p); m.quaternion.copy(pt.q); m.scale.copy(pt.sc); g.add(m); }
+}
+function clearArrow(a){ const g=a.obj; while(g.children.length) g.remove(g.children[0]); }
+// 止まっている矢印はまとめて描く（数百本あっても軽い）
+let instBox=null, instHead=null; const _mx=new T.Matrix4();
+function rebuildStatic(){
+  let nb=0, nh=0;
+  for(const a of S.arrows){ if(a.gone||a.active) continue;
+    for(const pt of a.parts0){ _mx.compose(pt.p,pt.q,pt.sc); if(pt.head) instHead.setMatrixAt(nh++,_mx); else instBox.setMatrixAt(nb++,_mx); } }
+  instBox.count=nb; instHead.count=nh; instBox.instanceMatrix.needsUpdate=true; instHead.instanceMatrix.needsUpdate=true;
+}
+function setActive(a,on){ a.active=on; if(!on) clearArrow(a); rebuildStatic(); }
 
 // ---------- 音（WebAudioで合成：ファイル不要でオフラインでも鳴る） ----------
 const SND=(()=>{
@@ -388,10 +471,14 @@ function startStage(n){
   group.add(cubeMesh);
   group.add(new T.LineSegments(new T.EdgesGeometry(cubeMesh.geometry), new T.LineBasicMaterial({color:0x1E2638,transparent:true,opacity:.35})));
   const occ=new Map();
-  for(const a of gen.arrows){ buildTrack(a); a.obj=new T.Group(); group.add(a.obj); drawArrow(a,0,MAT.ink); a.s=0; a.cells.forEach(c=>occ.set(ck(c),a.id)); }
+  let tb=0, th=0;
+  for(const a of gen.arrows){ buildTrack(a); a.obj=new T.Group(); group.add(a.obj); a.s=0; a.parts0=partsOf(a,0);
+    a.parts0.forEach(pt=>pt.head?th++:tb++); a.cells.forEach(c=>occ.set(ck(c),a.id)); }
+  instBox=new T.InstancedMesh(unitBox,MAT.ink,Math.max(1,tb)); instHead=new T.InstancedMesh(headGeo,MAT.ink,Math.max(1,th));
+  instBox.frustumCulled=false; instHead.frustumCulled=false; group.add(instBox); group.add(instHead);
   group.quaternion.setFromEuler(new T.Euler(0.5,-0.72,0,'XYZ')); zoom=1;
   S={stage:n,arrows:gen.arrows,occ,left:gen.arrows.length,miss:0,total:gen.arrows.length,combo:0};
-  ui.clear.hidden=true; save(n); updateUI(); fitCamera();
+  ui.clear.hidden=true; save(n); rebuildStatic(); updateUI(); fitCamera();
 }
 function updateUI(){ ui.stage.textContent=S.stage; ui.left.textContent=S.left; ui.miss.textContent=S.miss; }
 
@@ -403,12 +490,12 @@ function tapArrow(a){
     S.miss++; S.combo=0; updateUI(); vibrate(25); SND.miss();
     const blk=S.arrows[b.id];
     anims.set(a.id,{type:'bump',a,t:0,max:Math.max(0.28,b.k-1+0.3),blk});
-    drawArrow(blk,blk.s,MAT.block); blk.flash=0.5;
+    a.active=true; blk.active=true; rebuildStatic(); drawArrow(a,0,MAT.miss); drawArrow(blk,0,MAT.block);
     return;
   }
   SND.fly(); a.gone=true; S.left--; a.cells.forEach(c=>S.occ.delete(ck(c)));
   const mat=MAT.move.clone(); mat.transparent=true;
-  anims.set(a.id,{type:'fly',a,t:0,s0:a.s,mat});
+  anims.set(a.id,{type:'fly',a,t:0,s0:a.s,mat}); a.active=true; rebuildStatic();
   updateUI();
   if(S.left===0) setTimeout(showClear,450);
 }
@@ -456,8 +543,9 @@ function loop(now){
       const sp=24, out=an.max/sp, tot=out*2+0.08;
       a.s = an.t<out ? an.t*sp : an.t<out+0.08 ? an.max : Math.max(0,an.max-(an.t-out-0.08)*sp);
       drawArrow(a,a.s,MAT.miss);
-      if(an.t>=tot){ a.s=0; drawArrow(a,0,MAT.ink); anims.delete(id);
-        const b=an.blk; if(!b.gone&&!anims.has(b.id)) drawArrow(b,b.s,MAT.ink); }
+      if(an.t>=tot){ a.s=0; anims.delete(id); a.active=false; clearArrow(a);
+        const b=an.blk; if(!b.gone&&!anims.has(b.id)&&![...anims.values()].some(x=>x.blk===b)){ b.active=false; clearArrow(b); }
+        rebuildStatic(); }
     }
   }
   renderer.render(scene,camera);
