@@ -78,8 +78,8 @@
   #map{position:absolute;inset:0;z-index:6;background:var(--ground);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;padding:24px 16px}
   .map-head{position:absolute;top:14px;left:16px;right:16px;display:flex;align-items:center;justify-content:space-between}
   .map-head h2{margin:0;font-size:18px;font-weight:900;letter-spacing:.1em}
-  .map-track{position:relative;width:100%;max-width:520px;height:120px}
-  #mapRow{position:absolute;left:0;right:0;top:56px;height:0}
+  .map-track{position:relative;width:100%;max-width:640px;height:120px;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;-webkit-mask-image:linear-gradient(90deg,transparent,#000 24px,#000 calc(100% - 24px),transparent)} .map-track::-webkit-scrollbar{display:none}
+  #mapRow{position:absolute;left:0;top:56px;height:0}
   .seg{position:absolute;top:-1px;height:2px;background:transparent}
   .seg.done{background:var(--ink)}
   .seg.todo{background-image:linear-gradient(90deg,var(--ink-soft) 50%,transparent 50%);background-size:8px 2px;opacity:.45}
@@ -136,6 +136,7 @@
       <p id="mapMsg"></p>
       <button id="mapGo" class="primary" type="button">つづきをあそぶ</button>
       <div class="map-legend"><span><i class="lg done"></i>クリア</span><span><i class="lg now"></i>いまここ</span><span><i class="lg todo"></i>これから</span></div>
+      <p style="margin:0;font-size:11px;color:var(--ink-soft)">左右にスワイプすると、ステージ1から全部見られるよ</p>
     </div>
     <div id="clear" hidden>
       <div class="card">
@@ -699,8 +700,8 @@ let mapTimers=[];
 function nodeState(n, cur){ return n===cur ? 'now' : n<=maxCleared ? 'done' : 'todo'; }
 // cur を中心あたりにして前後のノードを並べる（無限なので終点はつくらない）
 function renderMap(cur, focus){
-  const W=mapRow.clientWidth||320, COUNT=7, from=Math.max(1, focus-3), gap=W/COUNT;
-  mapRow.innerHTML='';
+  const gap=64, from=1, COUNT=Math.max(cur,maxCleared,focus)+5; /* ステージ1から、先の5つまで全部ならべてスクロール */
+  mapRow.innerHTML=''; mapRow.style.width=(COUNT*gap+gap/2)+'px';
   const xs=[];
   for(let i=0;i<COUNT;i++){ xs.push(gap*(i+0.5)); }
   for(let i=0;i<COUNT-1;i++){ const n=from+i, seg=document.createElement('div');
@@ -719,6 +720,8 @@ function renderMap(cur, focus){
 function placeMarker(layout, n, animate){
   mapMarker.style.transition=animate?'left .9s cubic-bezier(.45,0,.2,1)':'none';
   mapMarker.style.left=layout.xs[n-layout.from]+'px';
+  const tr=mapRow.parentNode, x=layout.xs[n-layout.from]-tr.clientWidth/2;
+  if(tr.scrollTo) tr.scrollTo({left:Math.max(0,x), behavior:animate?'smooth':'auto'}); else tr.scrollLeft=Math.max(0,x);
 }
 let mapNext=null; // マップから始めるステージ
 function onNode(n){
