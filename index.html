@@ -159,13 +159,15 @@ function allSurface(N){
 function rng(seed){ return function(){ seed|=0; seed=seed+0x6D2B79F5|0; let t=Math.imul(seed^seed>>>15,1|seed);
   t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
 
-// ステージが進むほど面が広く（10×10から最大16×16）、矢印の「逃げ道」が長くなる＝読み合いが深くなる
-const sizeFor = s => Math.min(16, 10+Math.floor((s-1)/2));
+// ステージが進むほど面が広く（14×14から1ずつ、最大20×20）、最初から抜ける矢印が減っていく
+const sizeFor = s => Math.min(20, 13+s);
 const minRayFor = (s,N) => Math.min(Math.floor(N/3), 3+Math.floor((s-1)/4));
+const freeFracFor = s => Math.max(0.25, 0.5-(s-1)*0.03);
 
 // 必ず解ける配置：あとで消す順の「逆順」に矢印を置いていく。
 // 新しく置く矢印は、頭の前方（面の端まで）が空いているときだけ置ける。
-function generateOnce(N, seed, minRay){
+function generateOnce(N, seed, minRay, opt={}){
+  const straight = opt.straight ?? 0.35, tries0 = opt.tries ?? 12, maxFree = opt.maxFree ?? Math.max(3, Math.round(N/4));
   const r=rng(seed);
   const occ=new Map(), arrows=[];
   const shuffle=a=>{ for(let i=a.length-1;i>0;i--){ const j=Math.floor(r()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; };
@@ -176,7 +178,7 @@ function generateOnce(N, seed, minRay){
     let c=start, t=tangents(start.n)[Math.floor(r()*4)];
     while(path.length<target){
       const others=shuffle(tangents(c.n).filter(d=>d!==t&&d!==opp(t)));
-      const order = r()<0.55 ? [t,...others] : [...others,t];
+      const order = r()<straight ? [t,...others] : [...others,t];
       let moved=false;
       for(const o of order){ const s=step(c,o,N), k=ck(s.c);
         if(!occ.has(k)&&!set.has(k)){ path.push(s.c); set.add(k); c=s.c; t=s.t; moved=true; break; } }
@@ -188,24 +190,29 @@ function generateOnce(N, seed, minRay){
     const own=new Set(cells.map(ck));
     return rayCells(cells[cells.length-1], headDir(cells), N).every(c=>{ const k=ck(c); return !occ.has(k)&&!own.has(k); });
   }
-  const rayHit=new Map(); // すでに置いた矢印の「通り道」にあたるマス
-  function place(cells){
+  // 「まだ誰にもふさがれていない矢印」＝このままだと最初から抜ける矢印
+  const free=new Set(), freeRay=new Map(); // マス → そのマスを通り道にしている“ふさがれていない”矢印たち
+  function place(cells, fb){
     const id=arrows.length; arrows.push({id,cells,hd:headDir(cells)});
     cells.forEach(c=>occ.set(ck(c),id));
-    rayCells(cells[cells.length-1],headDir(cells),N).forEach(c=>{ const k=ck(c); rayHit.set(k,(rayHit.get(k)||0)+1); });
+    for(const f of fb){ free.delete(f); }
+    free.add(id);
+    rayCells(cells[cells.length-1],headDir(cells),N).forEach(c=>{ const k=ck(c); if(!freeRay.has(k)) freeRay.set(k,new Set()); freeRay.get(k).add(id); });
   }
-  // 他の矢印の通り道をふさぐ数（多いほど順番の読み合いが深くなる）
-  const blocks = cells => cells.reduce((s,c)=>s+(rayHit.get(ck(c))||0),0);
+  // この矢印を置くと、ふさがれていない矢印を何本ふさげるか
+  const freeBlocked = cells => { const out=new Set();
+    for(const c of cells){ const ids=freeRay.get(ck(c)); if(ids) for(const f of ids) if(free.has(f)) out.add(f); }
+    return out; };
   // 最後の2周はすき間埋め：逃げ道の条件を少しゆるめて空白を減らす（埋めた矢印が他の通り道もふさぐ）
   const PASSES=6;
   for(let pass=0;pass<PASSES;pass++){
-    const need = pass>=PASSES-2 ? Math.min(minRay,2) : minRay;
+    const fill = pass>=PASSES-2, need = fill ? Math.min(minRay,2) : minRay;
     let placed=0;
     for(const start of shuffle(allSurface(N))){
       if(occ.has(ck(start))) continue;
       // 候補をいくつか作り、「頭の前方が長い＝あとで他の矢印に塞がれやすい」ものを選ぶ
-      let best=null, bestScore=-1;
-      for(let tries=0;tries<10;tries++){
+      let best=null, bestScore=-1, bestFb=null;
+      for(let tries=0;tries<tries0;tries++){
         const target=3+Math.floor(r()*(maxLen-2));
         const path=walk(start,target);
         if(path.length<2) continue;
@@ -213,11 +220,13 @@ function generateOnce(N, seed, minRay){
           if(!clearFor(cand)) continue;
           const rl=rayCells(cand[cand.length-1],headDir(cand),N).length;
           if(rl<need) continue; // 頭が端ぎりぎりで外向き＝いつでも抜ける矢印は作らない
-          const sc=rl*2+cand.length+blocks(cand)*5+r()*2;
-          if(sc>bestScore){ bestScore=sc; best=cand; }
+          const fb=freeBlocked(cand);
+          if((fill || free.size>=maxFree) && fb.size<1) continue; // 最初から抜ける矢印は数本まで。それ以外は必ず他をふさぐ
+          const sc=fb.size*30+rl*2+cand.length*0.5+r()*2;
+          if(sc>bestScore){ bestScore=sc; best=cand; bestFb=fb; }
         }
       }
-      if(best){ place(best); placed++; }
+      if(best){ place(best,bestFb); placed++; }
     }
     if(!placed && pass<PASSES-2) pass=PASSES-3;
   }
@@ -236,9 +245,9 @@ function analyze(N, arrows){
 // 何通りか作って、いちばん歯ごたえのある配置を採用
 function generate(stage){
   const N=sizeFor(stage), minRay=minRayFor(stage,N); let best=null;
-  const K = N>=14 ? 3 : N>=12 ? 4 : 6;
+  const K = N>=18 ? 1 : N>=16 ? 2 : 3, maxFree=Math.max(3,Math.round(N*freeFracFor(stage)));
   for(let k=0;k<K;k++){
-    const g=generateOnce(N, stage*7919+k*104729+3, minRay), m=analyze(N,g.arrows);
+    const g=generateOnce(N, stage*7919+k*104729+3, minRay, {maxFree}), m=analyze(N,g.arrows);
     if(!m) continue;
     const score=m.depth*2 - m.ratio*20 + g.arrows.reduce((s,a)=>s+a.cells.length,0)/(6*N*N)*4;
     if(!best||score>best.score) best={...g,score,m};
@@ -492,8 +501,15 @@ function pick(cx,cy){
   const lp=group.worldToLocal(hit.point.clone()), fn=hit.face.normal;
   let n=0; for(let d=0;d<6;d++){ const v=DIRS[d]; if(v[0]*fn.x+v[1]*fn.y+v[2]*fn.z>0.9) n=d; }
   const p=[lp.x,lp.y,lp.z].map((v,i)=>Math.min(N-1,Math.max(0,Math.floor(v-DIRS[n][i]*0.01+N/2))));
-  const id=S.occ.get(ck({p,n}));
-  if(id!==undefined) tapArrow(S.arrows[id]);
+  // 少しずれていても、いちばん近いマスの矢印を拾う（マスが小さくても押しやすく）
+  const ax2=[0,1,2].filter(i=>i!==(n>>1)); let bestId, bestD=1e9;
+  for(let da=-1;da<=1;da++)for(let db=-1;db<=1;db++){
+    const q=p.slice(); q[ax2[0]]+=da; q[ax2[1]]+=db; if(!inb(q,N)) continue;
+    const id=S.occ.get(ck({p:q,n})); if(id===undefined) continue;
+    const c=surf({p:q,n}), d=(c.x-lp.x)**2+(c.y-lp.y)**2+(c.z-lp.z)**2;
+    if(d<bestD&&d<0.8){ bestD=d; bestId=id; }
+  }
+  if(bestId!==undefined) tapArrow(S.arrows[bestId]);
 }
 
 // ---------- ボタン ----------
