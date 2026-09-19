@@ -83,7 +83,6 @@
     <div class="stats">
       <span>ステージ<b id="sStage">1</b></span>
       <span>のこり<b id="sLeft">0</b></span>
-      <span class="miss">ミス<b id="sMiss">0</b></span>
     </div>
   </header>
   <div id="stage">
@@ -505,7 +504,7 @@ function updateHint(){
   if(hintOn && S && S.left>0){ hintArrow=pickHint(); if(hintArrow){ hintArrow.active=true; drawArrow(hintArrow,0,MAT.hint); } }
   rebuildStatic();
 }
-function updateUI(){ ui.stage.textContent=S.stage; ui.left.textContent=S.left; ui.miss.textContent=S.miss; }
+function updateUI(){ ui.stage.textContent=S.stage; ui.left.textContent=S.left; }
 
 function tapArrow(a){
   if(a.gone) return;
@@ -526,10 +525,10 @@ function tapArrow(a){
   if(S.left===0) setTimeout(showClear,450);
 }
 // ミス0で星3つ、2回までなら星2つ、それ以上は星1つ
-const starsFor = miss => miss===0 ? 3 : miss<=2 ? 2 : 1;
+// クリアのお祝い：星は3つとも光らせる（ミスでの評価はしない）
 function showClear(){
-  const n=starsFor(S.miss);
-  ui.clearMsg.textContent='矢印'+S.total+'本ぜんぶ抜けた！　ミス '+S.miss+' 回'+(S.miss===0?'　パーフェクト！':'');
+  const n=3;
+  ui.clearMsg.textContent='矢印'+S.total+'本ぜんぶ抜けた！';
   const box=document.getElementById('stars'); box.innerHTML='';
   for(let i=0;i<3;i++){ const e=document.createElement('span'); e.className='star'+(i<n?' on':''); e.textContent='★'; e.style.animationDelay=(0.15+i*0.22)+'s'; box.appendChild(e); }
   ui.clear.hidden=false; save(S.stage+1); SND.clear();
